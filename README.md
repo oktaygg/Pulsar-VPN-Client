@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/app_images/icon.ico" width="64">
-</p>
-
 <h1 align="center">Pulsar</h1>
 
 <p align="center">
