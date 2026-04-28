@@ -18,7 +18,7 @@
 
 ## 📥 Установка
 
-Скачай установщик со страницы [релизов](https://github.com/korwinouir/pulsar/releases) и запусти.
+Скачай установщик со страницы [релизов](https://github.com/oktaygg/Pulsar-VPN-Client/releases/tag/v1.0.0-beta) и запусти.
 
 > Требуются права администратора (нужны для TUN-интерфейса).
 
