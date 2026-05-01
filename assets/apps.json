@@ -1,0 +1,168 @@
+{
+  "apps": [
+    {
+      "name": "Google Chrome",
+      "exe": "chrome.exe"
+    },
+    {
+      "name": "Yandex Browser",
+      "exe": "browser.exe"
+    },
+    {
+      "name": "Discord",
+      "exe": "Discord.exe"
+    },
+    {
+      "name": "Spotify",
+      "exe": "Spotify.exe"
+    },
+    {
+      "name": "ChatGPT Desktop",
+      "exe": "ChatGPT.exe"
+    },
+    {
+      "name": "Opera GX",
+      "exe": "opera_gx.exe"
+    },
+    {
+      "name": "Steam Web Helper",
+      "exe": "steamwebhelper.exe"
+    },
+    {
+      "name": "Steam",
+      "exe": "steam.exe"
+    },
+    {
+      "name": "Mozilla Firefox",
+      "exe": "firefox.exe"
+    },
+    {
+      "name": "Microsoft Edge",
+      "exe": "msedge.exe"
+    },
+    {
+      "name": "Rockstar Games Launcher",
+      "exe": "Launcher.exe"
+    },
+    {
+      "name": "Brave Browser",
+      "exe": "brave.exe"
+    },
+    {
+      "name": "Epic Games Launcher",
+      "exe": "EpicGamesLauncher.exe"
+    },
+    {
+      "name": "Riot Client",
+      "exe": "RiotClientServices.exe"
+    },
+    {
+      "name": "Valorant",
+      "exe": "VALORANT-Win64-Shipping.exe"
+    },
+    {
+      "name": "Apex Legends",
+      "exe": "r5apex.exe"
+    },
+    {
+      "name": "Ubisoft Connect",
+      "exe": "upc.exe"
+    },
+    {
+      "name": "EA App",
+      "exe": "EADesktop.exe"
+    },
+    {
+      "name": "Battle.net",
+      "exe": "Battle.net.exe"
+    },
+    {
+      "name": "Figma",
+      "exe": "Figma.exe"
+    },
+    {
+      "name": "Slack",
+      "exe": "slack.exe"
+    },
+    {
+      "name": "Minecraft",
+      "exe": "javaw.exe"
+    },
+    {
+      "name": "Genshin Impact",
+      "exe": "GenshinImpact.exe"
+    },
+    {
+      "name": "Honkai Star Rail",
+      "exe": "StarRail.exe"
+    },
+    {
+      "name": "Counter-Strike 2",
+      "exe": "cs2.exe"
+    },
+    {
+      "name": "Dota 2",
+      "exe": "dota2.exe"
+    },
+    {
+      "name": "League of Legends Client",
+      "exe": "LeagueClient.exe"
+    },
+    {
+      "name": "Fortnite",
+      "exe": "FortniteClient-Win64-Shipping.exe"
+    },
+    {
+      "name": "PUBG BATTLEGROUNDS",
+      "exe": "TslGame.exe"
+    },
+    {
+      "name": "Grand Theft Auto V",
+      "exe": "GTA5.exe"
+    },
+    {
+      "name": "Rust",
+      "exe": "RustClient.exe"
+    },
+    {
+      "name": "Roblox",
+      "exe": "RobloxPlayerBeta.exe"
+    },
+    {
+      "name": "Telegram",
+      "exe": "Telegram.exe"
+    },
+    {
+      "name": "WhatsApp",
+      "exe": "WhatsApp.exe"
+    },
+    {
+      "name": "Zoom",
+      "exe": "Zoom.exe"
+    },
+    {
+      "name": "Microsoft Teams",
+      "exe": "ms-teams.exe"
+    },
+    {
+      "name": "Visual Studio Code",
+      "exe": "Code.exe"
+    },
+    {
+      "name": "GitHub Desktop",
+      "exe": "GitHubDesktop.exe"
+    },
+    {
+      "name": "AnyDesk",
+      "exe": "AnyDesk.exe"
+    },
+    {
+      "name": "TeamViewer",
+      "exe": "TeamViewer.exe"
+    },
+    {
+      "name": "Xbox App",
+      "exe": "XboxPcApp.exe"
+    }
+  ]
+}
