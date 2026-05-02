@@ -29,13 +29,18 @@ from ui.main_window import MainWindow
 _THIS_EXE = os.path.basename(sys.executable).lower() if getattr(sys, 'frozen', False) else ""
 
 def _find_existing_window():
-    """Ищет уже запущенное окно Pulsar через Win32 API."""
+    """Ищет уже запущенное окно Pulsar через Win32 API и показывает его."""
     try:
+        # Ищем окно по заголовку
         hwnd = ctypes.windll.user32.FindWindowW(None, "Pulsar")
         if hwnd:
-            # Если окно свёрнуто в трей — восстанавливаем
-            if ctypes.windll.user32.IsWindowVisible(hwnd) == 0:
+            # Если окно свёрнуто — восстанавливаем
+            if ctypes.windll.user32.IsIconic(hwnd):
                 ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            # Если окно скрыто (в трее) — показываем
+            elif ctypes.windll.user32.IsWindowVisible(hwnd) == 0:
+                ctypes.windll.user32.ShowWindow(hwnd, 5)  # SW_SHOW
+            # Выводим на передний план в любом случае
             ctypes.windll.user32.SetForegroundWindow(hwnd)
             return True
     except Exception:

@@ -345,7 +345,7 @@ class MainWindow(QMainWindow):
 
         # Путь к дефолтному фону — не удаляется при смене
         self._default_bg_path: str = os.path.join(
-            _PROJECT_DIR, "assets", "app_images", "pulsar.png"
+            _PROJECT_DIR, "assets", "app_images", "pulsar.jpg"
         )
         # Текущий пользовательский фон (не дефолтный) — удаляется при замене
         self._current_user_bg: str = ""
@@ -457,27 +457,26 @@ class MainWindow(QMainWindow):
         tbl.setSpacing(0)
         tbl.addStretch()
 
-        for sym, act in [("─", "min"), ("□", "max"), ("✕", "close")]:
+        self._tb_btns: list[tuple[QPushButton, str]] = []
+
+        for sym, act, size in [("‒", "min", 16), ("▢", "max", 20), ("✕", "close", 16)]:
             b = QPushButton(sym)
-            b.setFixedSize(36, 28)
-            b.setFont(QFont("Segoe UI", 11))
+            b.setFixedSize(40, 30)
+            b.setFont(QFont("Segoe UI", size))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            is_x = (act == "close")
-            b.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent; border: none;
-                    color: {"rgba(255,88,88,170)" if is_x else "rgba(142,122,210,142)"};
-                    border-radius: 6px;
-                }}
-                QPushButton:hover {{
-                    background: {"rgba(182,38,38,130)" if is_x else "rgba(82,52,164,94)"};
-                    color: {"rgba(255,128,128,240)" if is_x else "rgba(198,178,254,220)"};
-                }}
-            """)
-            if   act == "min":   b.clicked.connect(self.showMinimized)
-            elif act == "max":   b.clicked.connect(self._toggle_max)
-            else:                b.clicked.connect(self._hide_to_tray)
+            b.setFlat(True)
+
+            self._tb_btns.append((b, act))
+
+            if act == "min":
+                b.clicked.connect(self.showMinimized)
+            elif act == "max":
+                b.clicked.connect(self._toggle_max)
+            else:
+                b.clicked.connect(self._hide_to_tray)
             tbl.addWidget(b)
+
+        self._apply_tb_styles()
 
         tb.mousePressEvent       = self._tb_press
         tb.mouseMoveEvent        = self._tb_move
@@ -541,6 +540,45 @@ class MainWindow(QMainWindow):
         root.addLayout(body)
 
         QTimer.singleShot(150, self._apply_blur)
+
+    def _apply_tb_styles(self) -> None:
+        """Перекрашивает кнопки тайтлбара под цвет темы (приглушённые тона)."""
+        c = ThemeManager.instance().color()
+        r, g, b = c.red(), c.green(), c.blue()
+
+        # Размеры шрифта: min=16, max=18, close=15
+        font_sizes = {"min": 18, "max": 24, "close": 13}
+
+        for btn, act in self._tb_btns:
+            is_x = (act == "close")
+            fs = font_sizes.get(act, 12)
+
+            if is_x:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: transparent; border: none;
+                        color: rgba({int(r * 0.65)},{int(g * 0.50)},{int(b * 0.60)},160);
+                        border-radius: 6px;
+                        font-size: {fs}px;
+                    }}
+                    QPushButton:hover {{
+                        background: rgba(182,38,38,130);
+                        color: rgba(255,128,128,240);
+                    }}
+                """)
+            else:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: transparent; border: none;
+                        color: rgba({int(r * 0.65)},{int(g * 0.50)},{int(b * 0.60)},160);
+                        border-radius: 6px;
+                        font-size: {fs}px;
+                    }}
+                    QPushButton:hover {{
+                        background: rgba({int(r * 0.30)},{int(g * 0.18)},{int(b * 0.32)},100);
+                        color: rgba({int(r * 0.85)},{int(g * 0.68)},{int(b * 0.82)},210);
+                    }}
+                """)
 
     # ── Навигация ─────────────────────────────────────────
 
@@ -767,6 +805,7 @@ class MainWindow(QMainWindow):
             theme_color=c.name(),
             custom_color=self._p_settings._custom_color.name(),  # noqa: SLF001
         )
+        self._apply_tb_styles()
         self.update()
 
     # ── Фон ───────────────────────────────────────────────
@@ -857,6 +896,7 @@ class MainWindow(QMainWindow):
             oy = (sc.height() - rect.height()) // 2
             p.drawPixmap(0, 0, sc, ox, oy, rect.width(), rect.height())
             p.fillRect(rect, QColor(7, 3, 18, 152))
+
         else:
             ac = ThemeManager.instance().color()
             r, g, b = ac.red(), ac.green(), ac.blue()
@@ -876,7 +916,25 @@ class MainWindow(QMainWindow):
                 rg.setColorAt(1, QColor(0, 0, 0, 0))
                 p.fillRect(rect, QBrush(rg))
 
+        # ── ПУЛЬСАР (star.png) — рисуется ВСЕГДА, независимо от фона ──
+        if hasattr(self, '_p_servers') and hasattr(self._p_servers, '_pwr'):
+            pwr = self._p_servers._pwr
+            if pwr.isVisible() and pwr.width() > 0:
+                pwr_center = pwr.mapToGlobal(QPoint(pwr.width() // 2, pwr.height() // 2))
+                local_center = self.mapFromGlobal(pwr_center)
+
+                star_path = os.path.join(_PROJECT_DIR, "assets", "app_images", "star.png")
+                star_px = QPixmap(star_path)
+                if not star_px.isNull():
+                    p.save()
+                    p.setOpacity(0.6)
+                    px_x = local_center.x() - star_px.width() // 2 - 90
+                    py_y = local_center.y() - star_px.height() // 2 + 24
+                    p.drawPixmap(px_x, py_y, star_px)
+                    p.restore()
+
         p.setClipping(False)
+
         ac2 = ThemeManager.instance().color()
         p.setPen(QPen(
             QColor(int(ac2.red()*0.86), int(ac2.green()*0.54), int(ac2.blue()*0.87), 84),

@@ -27,7 +27,7 @@ ui/whitelist_page.py — страница белых списков прилож
 import os
 import sys
 
-from PyQt6.QtCore import Qt, QRectF, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QRectF, QSize, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QBrush, QColor, QFont, QFontMetrics, QIcon,
     QImage, QPainter, QPainterPath, QPen, QPixmap,
@@ -259,11 +259,27 @@ class _PanelHeader(QWidget):
 
         self._plus_btn: QPushButton | None = None
         if add_btn:
-            btn = QPushButton("+")
+            btn = QPushButton()
             btn.setFixedSize(34, 34)
-            btn.setFont(QFont("Segoe UI", 20, QFont.Weight.Normal))
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip("Добавить приложение")
+            btn.setStyleSheet(themed_btn_ss() + """
+                QPushButton {
+                    padding: 0px;
+                    text-align: center;
+                }
+            """)
+            plus_path = os.path.join(_PROJECT_DIR, "assets", "app_images", "plus.png")
+            if os.path.isfile(plus_path):
+                from ui.widgets import _tint_pixmap
+                px = QPixmap(plus_path)
+                if not px.isNull():
+                    white_px = _tint_pixmap(px, QColor(255, 255, 255))
+                    btn.setIcon(QIcon(white_px))
+                    btn.setIconSize(QSize(20, 20))
+            else:
+                btn.setText("+")
+                btn.setFont(QFont("Segoe UI", 20, QFont.Weight.Normal))
             lay.addWidget(btn)
             self._plus_btn = btn
 
@@ -278,8 +294,12 @@ class _PanelHeader(QWidget):
         self._lbl.setStyleSheet(
             "color: rgba(255,255,255,220); background: transparent;")
         if self._plus_btn:
-            self._plus_btn.setStyleSheet(
-                themed_btn_ss("padding-left: 1px; padding-bottom: 4px;"))
+            self._plus_btn.setStyleSheet(themed_btn_ss() + """
+                QPushButton {
+                    padding: 0px;
+                    text-align: center;
+                }
+            """)
 
     def paintEvent(self, _e) -> None:
         p       = QPainter(self)
@@ -704,12 +724,27 @@ class WhitelistPage(QWidget):
         self._search_edit.textChanged.connect(self._on_search)
         search_row.addWidget(self._search_edit, 1)
 
-        self._clear_btn = QPushButton("✕")
+        self._clear_btn = QPushButton()
         self._clear_btn.setFixedSize(38, 38)
-        self._clear_btn.setFont(QFont("Segoe UI", 11))
         self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._clear_btn.setToolTip("Очистить поиск")
-        self._clear_btn.setStyleSheet(themed_btn_ss())
+        delete_path = os.path.join(_PROJECT_DIR, "assets", "app_images", "delete.png")
+        if os.path.isfile(delete_path):
+            from ui.widgets import _tint_pixmap
+            px = QPixmap(delete_path)
+            if not px.isNull():
+                white_px = _tint_pixmap(px, QColor(255, 255, 255))
+                self._clear_btn.setIcon(QIcon(white_px))
+                self._clear_btn.setIconSize(QSize(20, 20))
+        else:
+            self._clear_btn.setText("✕")
+            self._clear_btn.setFont(QFont("Segoe UI", 11))
+        self._clear_btn.setStyleSheet(themed_btn_ss() + """
+            QPushButton {
+                padding: 0px;
+                text-align: center;
+            }
+        """)
         self._clear_btn.clicked.connect(self._search_edit.clear)
         search_row.addWidget(self._clear_btn)
         search_row.addStretch(1)
@@ -917,7 +952,12 @@ class WhitelistPage(QWidget):
     def _on_theme_changed(self, c: QColor) -> None:
         self._scroll1.setStyleSheet(scrollbar_ss())
         self._scroll2.setStyleSheet(scrollbar_ss())
-        self._clear_btn.setStyleSheet(themed_btn_ss())
+        self._clear_btn.setStyleSheet(themed_btn_ss() + """
+                    QPushButton {
+                        padding: 0px;
+                        text-align: center;
+                    }
+                """)
         r, g, b = c.red(), c.green(), c.blue()
         self._empty_lbl.setStyleSheet(
             f"color: rgba({min(255,int(r*0.60+60))},{min(255,int(g*0.50+60))},"

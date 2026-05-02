@@ -23,9 +23,11 @@ ui/servers_page.py — страница серверов и управления
 import datetime
 import re
 import threading
+import logging
+logger = logging.getLogger(__name__)
 
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize
+from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap, QIcon
 from PyQt6.QtWidgets import (
     QGraphicsBlurEffect, QGraphicsOpacityEffect,
     QHBoxLayout, QLabel, QLineEdit,
@@ -42,9 +44,9 @@ from ui.widgets import (
 # Проверяем доступность модуля парсера
 import sys as _sys
 import os as _os
-_GUI_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-if _GUI_DIR not in _sys.path:
-    _sys.path.insert(0, _GUI_DIR)
+_PROJECT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _PROJECT_DIR not in _sys.path:
+    _sys.path.insert(0, _PROJECT_DIR)
 
 try:
     from core.parser import fetch_subscription, parse_any_link, get_flag_emoji
@@ -107,30 +109,78 @@ class SubscriptionLoader(QThread):
             self.error.emit("Ни один сервер не удалось распознать.")
             return
 
-        # Параллельный пинг
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        try:
+            from core.ping_checker import PingChecker, format_ping
+        except ImportError:
+            # Fallback на старый метод если ping_checker недоступен
+            logger.debug("ping_checker module not found, using fallback")
+            import subprocess
+            import socket
+            import time
+            import platform as _platform
+            from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        def _ping(args):
-            idx, host, port = args
-            try:
-                import socket, time
-                start = time.time()
-                with socket.create_connection((host, int(port)), timeout=2.0):
+            def _ping_server_fallback(args):
+                """Старый метод для обратной совместимости."""
+                idx, host, port = args
+
+                # TCP ping (более надёжен чем ICMP)
+                try:
+                    start = time.monotonic()
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(3.0)  # Увеличен таймаут
+                    result = sock.connect_ex((host, int(port)))
+                    elapsed = int((time.monotonic() - start) * 1000)
+                    sock.close()
+
+                    if result == 0 and 0 < elapsed < 5000:
+                        return idx, elapsed
+                except:
                     pass
-                return idx, int((time.time() - start) * 1000)
-            except Exception:
+
                 return idx, None
 
-        ping_map: dict[int, int | None] = {}
-        tasks = [(i, info["host"], info["port"]) for i, (_, info) in enumerate(parsed_pairs)]
-        with ThreadPoolExecutor(max_workers=min(60, len(tasks))) as ex:
-            futs = {ex.submit(_ping, t): t[0] for t in tasks}
-            for fut in as_completed(futs):
-                try:
-                    idx, ms = fut.result()
-                    ping_map[idx] = ms
-                except Exception:
-                    pass
+            # Запуск fallback пинга
+            tasks = [(i, info["host"], info["port"]) for i, (_, info) in enumerate(parsed_pairs)]
+            ping_map: dict[int, int | None] = {i: None for i in range(len(parsed_pairs))}
+
+            max_workers = min(15, len(tasks))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_ping_server_fallback, task): task[0] for task in tasks}
+                for future in as_completed(futures):
+                    try:
+                        idx, ping_ms = future.result()
+                        ping_map[idx] = ping_ms
+                    except Exception as e:
+                        logger.debug(f"Ping error: {e}")
+
+        else:
+            # ─── НОВЫЙ МЕТОД С PingChecker ───
+            logger.debug(f"Starting TCP ping for {len(parsed_pairs)} servers...")
+
+            # Создаём PingChecker с оптимальными настройками
+            checker = PingChecker(
+                timeout=3.5,  # Увеличенный таймаут для зарубежных серверов
+                retries=1  # Одна попытка для скорости (можно увеличить до 2)
+            )
+
+            # Формируем список задач
+            server_tasks = [(info["host"], info["port"]) for _, info in parsed_pairs]
+
+            # Измеряем все серверы параллельно
+            results = checker.measure_multiple(server_tasks)
+
+            # Преобразуем результаты в формат {index: ping_ms}
+            ping_map: dict[int, int | None] = {}
+            for i, (host, port) in enumerate(server_tasks):
+                ping_map[i] = results.get((host, port))
+
+            # Статистика
+            success_count = sum(1 for v in ping_map.values() if v is not None)
+            logger.debug(f"Done: {success_count}/{len(ping_map)} servers responded")
+
+            # Освобождаем ресурсы
+            checker.cleanup()
 
         servers = []
         for i, (lnk, info) in enumerate(parsed_pairs):
@@ -604,6 +654,7 @@ class ServersPage(QWidget):
         # ── Состояние ────────────────────────────────────
         self._connected       = False
         self._connecting      = False
+        self._loading_subscription = False
         self._seconds         = 0
         self._themed_widgets: list = []
         self._sub_cards:      list[VpnSubscriptionCard] = []
@@ -646,13 +697,28 @@ class ServersPage(QWidget):
         hl.addWidget(lbl)
         hl.addStretch()
 
-        self._add_btn = QPushButton("+")
+        self._add_btn = QPushButton()
         self._add_btn.setFixedSize(34, 34)
-        self._add_btn.setFont(QFont("Segoe UI", 26, QFont.Weight.Medium))
         self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._add_btn.setToolTip("Добавить VPN по ссылке")
-        self._add_btn.setStyleSheet(
-            themed_btn_ss("padding: 0px 0px 7px 1px; text-align: center;"))
+        # Загружаем иконку plus.png
+        plus_path = _os.path.join(_PROJECT_DIR, "assets", "app_images", "plus.png")
+        if _os.path.isfile(plus_path):
+            from ui.widgets import _tint_pixmap
+            px = QPixmap(plus_path)
+            if not px.isNull():
+                white_px = _tint_pixmap(px, QColor(255, 255, 255))
+                self._add_btn.setIcon(QIcon(white_px))
+                self._add_btn.setIconSize(QSize(20, 20))
+        else:
+            self._add_btn.setText("+")
+            self._add_btn.setFont(QFont("Segoe UI", 26, QFont.Weight.Medium))
+        self._add_btn.setStyleSheet(themed_btn_ss() + """
+            QPushButton {
+                padding: 0px;
+                text-align: center;
+            }
+        """)
         self._add_btn.clicked.connect(self._on_add_btn_clicked)
         self._themed_widgets.append(("add_btn", self._add_btn))
         hl.addWidget(self._add_btn)
@@ -695,21 +761,29 @@ class ServersPage(QWidget):
         vpn_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         vl = QVBoxLayout(vpn_wrap)
         vl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        vl.setSpacing(16)
+        vl.setSpacing(8)
 
+        # Кнопка — фиксированная позиция
         self._pwr = PowerButton()
         self._pwr.clicked.connect(self._toggle_vpn)
+        vl.addStretch(1)
         vl.addWidget(self._pwr, 0, Qt.AlignmentFlag.AlignHCenter)
+        vl.addSpacing(8)
 
-        self._status_lbl = QLabel("Отключено")
+        # Статус — фиксированная высота (всегда 2 строки)
+        self._status_lbl = QLabel("Отключено\n")
         self._status_lbl.setFont(QFont("Segoe UI", 14, QFont.Weight.Medium))
         self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status_lbl.setFixedHeight(48)  # место под 2 строки всегда
         self._status_lbl.setStyleSheet(
             "color: rgba(220,215,255,200); background: transparent;")
-        vl.addWidget(self._status_lbl)
+        vl.addWidget(self._status_lbl, 0, Qt.AlignmentFlag.AlignHCenter)
+        vl.addStretch(1)
+        self._status_ss = "color: rgba(220,215,255,200); background: transparent;"
+
         right.addWidget(vpn_wrap, 1)
 
-        # ── Нижняя панель: таймер + белый список ─────────
+        # ── Нижняя панель: белый список ─────────
         bot_wrap = QWidget()
         bot_wrap.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         bot_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -719,30 +793,16 @@ class ServersPage(QWidget):
         bot_outer.addStretch()
 
         bot = GlassCard(radius=14, alpha=198)
-        bot.setFixedSize(260, 105)
+        bot.setFixedSize(240, 80)
         bl = QVBoxLayout(bot)
         bl.setContentsMargins(16, 10, 16, 10)
-        bl.setSpacing(6)
-
-        # Строка таймера
-        tr = QHBoxLayout()
-        tr.setSpacing(0)
-        tl_lbl = QLabel("Время подключения:")
-        tl_lbl.setFont(QFont("Segoe UI", 12))
-        tl_lbl.setStyleSheet("color: rgba(220,215,255,200); background: transparent;")
-        tr.addWidget(tl_lbl)
-        tr.addStretch()
-        self._timer_lbl = QLabel("00:00:00")
-        self._timer_lbl.setFont(QFont("Segoe UI", 12, QFont.Weight.Medium))
-        self._timer_lbl.setStyleSheet("color: rgba(220,215,255,200); background: transparent;")
-        tr.addWidget(self._timer_lbl)
-        bl.addLayout(tr)
+        bl.setSpacing(4)
 
         # Строка «Белый список» с тогглом
         wr = QHBoxLayout()
         wr.setSpacing(0)
         wl_lbl = QLabel("Белый список")
-        wl_lbl.setFont(QFont("Segoe UI", 15, QFont.Weight.Medium))
+        wl_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Medium))
         wl_lbl.setStyleSheet("color: rgba(220,215,255,200); background: transparent;")
         wr.addWidget(wl_lbl)
         wr.addStretch()
@@ -777,8 +837,13 @@ class ServersPage(QWidget):
     def _refresh_theme(self, _c: QColor) -> None:
         for tag, w in self._themed_widgets:
             if tag == "add_btn":
-                w.setStyleSheet(
-                    themed_btn_ss("padding-left: 1px; padding-bottom: 4px;"))
+                # Сохраняем стиль как при создании
+                w.setStyleSheet(themed_btn_ss() + """
+                    QPushButton {
+                        padding: 0px;
+                        text-align: center;
+                    }
+                """)
             elif tag == "outer_scroll":
                 w.setStyleSheet("background: transparent; border: none;")
             elif tag == "wb":
@@ -801,21 +866,20 @@ class ServersPage(QWidget):
         return lbl
 
     def _update_pwr_state(self) -> None:
-        """Обновляет курсор кнопки питания и её прозрачность."""
-        can_click = self._selected_server is not None and not self._connecting
-        self._pwr.setCursor(
-            Qt.CursorShape.PointingHandCursor if can_click
-            else Qt.CursorShape.ForbiddenCursor
-        )
-        if not self._connected and self._selected_server is None and not self._connecting:
+        blocked = self._selected_server is None or self._loading_subscription
+        self._pwr.set_blocked(blocked)
+
+        if not self._connected and self._selected_server is None and not self._loading_subscription:
             eff = QGraphicsOpacityEffect(self._pwr)
-            eff.setOpacity(0.4)
+            eff.setOpacity(0.7)
             self._pwr.setGraphicsEffect(eff)
         else:
             self._pwr.setGraphicsEffect(None)
+        self._pwr.update()
 
     def _start_subscription_load(self) -> None:
         self._selected_server = None
+        self._loading_subscription = True
         self._update_pwr_state()
 
         cfg = AppSettings.load()
@@ -846,10 +910,12 @@ class ServersPage(QWidget):
         self._subs_layout.addWidget(self._placeholder, 1)
 
     def _on_load_error(self, msg: str) -> None:
+        self._loading_subscription = False
         self._set_placeholder(f"❌  {msg}")
 
     def _on_loaded(self, sub_name: str, servers: list, userinfo) -> None:
         """Получили список серверов — строим карточку подписки."""
+        self._loading_subscription = False
         while self._subs_layout.count():
             item = self._subs_layout.takeAt(0)
             if item.widget():
@@ -921,14 +987,13 @@ class ServersPage(QWidget):
             self._start_disconnect()
 
     def _set_connecting_state(self, label: str) -> None:
-        """Переводит UI в переходное состояние."""
         self._connecting = True
-        self._update_pwr_state()
+        # БЕЗ _update_pwr_state — не блокируем кнопку
         for sc in self._sub_cards:
             sc.set_vpn_active(True)
-        self._status_lbl.setText(label)
+        self._status_lbl.setText(label + "\n")
         self._status_lbl.setStyleSheet(
-            "color: rgba(220,200,100,210); background: transparent;")
+            "color: rgba(220,215,255,200); background: transparent;")
 
     def _start_connect(self) -> None:
         self._set_connecting_state("Подключение…")
@@ -955,7 +1020,7 @@ class ServersPage(QWidget):
 
     def _on_vpn_success(self, connected: bool) -> None:
         self._connecting = False
-        self._connected  = connected
+        self._connected = connected
         self._pwr.set_connected(connected)
         self.vpn_state_changed.emit(connected)
 
@@ -963,21 +1028,23 @@ class ServersPage(QWidget):
             sc.set_vpn_active(connected)
 
         if connected:
-            ac      = ThemeManager.instance().color()
+            ac = ThemeManager.instance().color()
             r, g, b = ac.red(), ac.green(), ac.blue()
-            self._status_lbl.setText("Подключено")
-            self._status_lbl.setStyleSheet(
-                f"color: rgba({min(255,int(r*0.85+40))},{min(255,int(g*0.75+50))},"
-                f"{min(255,int(b*0.80+30))},235); background: transparent;"
+            color_ss = (
+                f"color: rgba({min(255, int(r * 0.85 + 40))},{min(255, int(g * 0.75 + 50))},"
+                f"{min(255, int(b * 0.80 + 30))},235); background: transparent;"
             )
+            self._status_ss = color_ss
+            self._status_lbl.setStyleSheet(color_ss)
             self._seconds = 0
+            self._status_lbl.setText("Подключено\n00:00:00")
             self._sec_timer.start(1000)
         else:
-            self._status_lbl.setText("Отключено")
+            self._status_lbl.setText("Отключено\n")
             self._status_lbl.setStyleSheet(
-                "color: rgba(155,150,175,190); background: transparent;")
+                "color: rgba(220,215,255,200); background: transparent;")
             self._seconds = 0
-            self._timer_lbl.setText("00:00:00")
+            self._sec_timer.stop()
 
         self._update_pwr_state()
 
@@ -987,10 +1054,9 @@ class ServersPage(QWidget):
         self._pwr.set_connected(False)
         self._status_lbl.setText(f"Ошибка: {msg}")
         self._status_lbl.setStyleSheet(
-            "color: rgba(240,80,80,230); background: transparent;")
+            "color: rgba(220,215,255,200); background: transparent;")
         self._sec_timer.stop()
         self._seconds = 0
-        self._timer_lbl.setText("00:00:00")
         self.vpn_state_changed.emit(False)
         for sc in self._sub_cards:
             sc.set_vpn_active(False)
@@ -1012,7 +1078,7 @@ class ServersPage(QWidget):
         h = self._seconds // 3600
         m = (self._seconds % 3600) // 60
         s = self._seconds % 60
-        self._timer_lbl.setText(f"{h:02d}:{m:02d}:{s:02d}")
+        self._status_lbl.setText(f"Подключено\n{h:02d}:{m:02d}:{s:02d}")
 
     # ── Белый список ─────────────────────────────────────
 

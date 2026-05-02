@@ -517,10 +517,7 @@ class _StatusBadge(QWidget):
 # ══════════════════════════════════════════════════════════
 
 class PowerButton(QWidget):
-    """
-    Круглая кнопка питания 260×260 px с пульсирующим радиальным свечением.
-    В состоянии «отключено» — серая, в состоянии «подключено» — цвет темы.
-    """
+    """Круглая кнопка питания 260×260 px с пульсирующим свечением."""
 
     clicked = pyqtSignal()
 
@@ -528,11 +525,13 @@ class PowerButton(QWidget):
         super().__init__(parent)
         self._connected = False
         self._hovered   = False
-        self._glow      = 40       # текущая интенсивность свечения
-        self._glow_dir  = 1        # направление пульсации: +1 или -1
+        self._glow      = 40
+        self._glow_dir  = 1
+        self._blocked = False
 
         self.setFixedSize(260, 260)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
 
         pulse_timer = QTimer(self)
         pulse_timer.timeout.connect(self._pulse)
@@ -541,43 +540,80 @@ class PowerButton(QWidget):
         ThemeManager.instance().connect_theme(self, lambda _c: self.update())
 
     def set_connected(self, connected: bool) -> None:
-        """Переключает визуальное состояние кнопки."""
         self._connected = connected
 
     def _pulse(self) -> None:
-        """Один шаг пульсации свечения."""
         self._glow += self._glow_dir * 2
-        if self._glow >= 120:
-            self._glow_dir = -1
-        if self._glow <= 40:
-            self._glow_dir = 1
+        if self._glow >= 120: self._glow_dir = -1
+        if self._glow <= 40:  self._glow_dir = 1
         self.update()
 
-    def enterEvent(self, _event) -> None:
-        self._hovered = True
-        self.update()
+    def _in_circle(self, pos) -> bool:
+        """Проверяет, находится ли точка внутри круга кнопки."""
+        cx, cy = self.width() // 2, self.height() // 2
+        R = 77
+        dx = pos.x() - cx
+        dy = pos.y() - cy
+        return dx * dx + dy * dy <= R * R
 
-    def leaveEvent(self, _event) -> None:
-        self._hovered = False
-        self.update()
+
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
+            if self._in_circle(event.position()):
+                # Если кнопка заблокирована — игнорируем клик
+                if self.cursor().shape() == Qt.CursorShape.ForbiddenCursor:
+                    return
+                self.clicked.emit()
+
+    def set_blocked(self, blocked: bool) -> None:  # ← ДОБАВЬ МЕТОД
+        self._blocked = blocked
+        if blocked:
+            self.setCursor(Qt.CursorShape.ForbiddenCursor)
+        else:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._in_circle(event.position()):
+            if self._blocked:
+                self._hovered = False
+                self.update()
+                self.setCursor(Qt.CursorShape.ForbiddenCursor)
+                return
+            # Доступна: нормальный hover
+            if not self._hovered:
+                self._hovered = True
+                self.update()
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            if self._hovered:
+                self._hovered = False
+                self.update()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        if self.cursor().shape() != Qt.CursorShape.ForbiddenCursor:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
 
     def paintEvent(self, _event) -> None:
-        p  = QPainter(self)
+        p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         cx, cy = self.width() // 2, self.height() // 2
-        R  = 84
+        R = 77
         ac = ThemeManager.instance().color()
 
-        # Цвет кнопки: акцент при подключении, серый при отключении
         if self._connected:
-            gc = ac
+            gc = QColor(
+                min(255, ac.red() + 40),
+                min(255, ac.green() + 40),
+                min(255, ac.blue() + 40)
+            )
         else:
-            grey = 155 if self._hovered else 130
-            gc   = QColor(grey, grey, grey + 12)
+            grey = 210 if self._hovered else 170
+            gc = QColor(grey, grey, grey + 12)
 
         # Радиальное свечение
         glow_r = 130
@@ -592,32 +628,20 @@ class PowerButton(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(0, 0, self.width(), self.height())
 
-        # Тело круга (полупрозрачный фон)
-        bg = QRadialGradient(float(cx), float(cy - 12), float(R))
-        if self._connected:
-            bg.setColorAt(0, QColor(
-                int(ac.red() * 0.22), int(ac.green() * 0.12), int(ac.blue() * 0.25), 32))
-            bg.setColorAt(1, QColor(
-                int(ac.red() * 0.08), int(ac.green() * 0.04), int(ac.blue() * 0.10), 16))
+        # Тело круга
+
+
+        # Иконка
+        if self._connected and self._hovered:
+            # При наведении на включённую — иконка ярче
+            ic = QColor(
+                min(255, gc.red() + 30),
+                min(255, gc.green() + 30),
+                min(255, gc.blue() + 30)
+            )
         else:
-            bg.setColorAt(0, QColor(62, 62, 72, 38))
-            bg.setColorAt(1, QColor(28, 28, 34, 20))
-        p.setBrush(QBrush(bg))
-
-        border_alpha = 240 if self._hovered else 185
-        border_width = 3.5 if self._hovered else 2.5
-        p.setPen(QPen(QColor(gc.red(), gc.green(), gc.blue(), border_alpha), border_width))
-        p.drawEllipse(cx - R, cy - R, R * 2, R * 2)
-
-        # Иконка питания (дуга + вертикальная линия)
-        if self._connected:
-            ic = ac
-        else:
-            grey_ic = 185 if self._hovered else 158
-            ic = QColor(grey_ic, grey_ic, grey_ic + 14)
-
-        pen = QPen(ic, 5.0, Qt.PenStyle.SolidLine,
-                   Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            ic = gc
+        pen = QPen(ic, 5.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawArc(cx - 32, cy - 32, 64, 64, 150 * 16, 240 * 16)
@@ -690,7 +714,7 @@ class ServerCard(QWidget):
         # Название (с обрезкой по ширине)
         self._name_lbl = QLabel()
         self._name_lbl.setFont(QFont("Segoe UI", 13))
-        self._name_lbl.setStyleSheet("color: rgba(210,218,250,220); background: transparent;")
+        self._name_lbl.setStyleSheet("color: rgb(255,255,255); background: transparent;")
 
         raw_name = data.get("name", "").lstrip()
         # Убираем эмодзи-флаги из начала строки (региональные индикаторы > U+2000)
@@ -717,13 +741,29 @@ class ServerCard(QWidget):
             self._ping_lbl.setStyleSheet(
                 "color: rgba(120,130,165,80); background: transparent;")
         else:
-            if ping < 80:
-                col = "rgba(70,220,130,230)"
-            elif ping < 150:
-                col = "rgba(240,192,64,230)"
+            # Обрезаем пинг до 999ms для красивого отображения
+            display_ping = min(ping, 999)
+
+            # Цветовая индикация:
+            # < 100ms  — зелёный (отличный пинг)
+            # 100-200ms — жёлтый (хороший пинг)
+            # 200-300ms — оранжевый (средний пинг)
+            # 300-999ms — красный (плохой пинг)
+            if display_ping < 100:
+                col = "rgba(70,220,130,230)"  # Зелёный
+            elif display_ping < 200:
+                col = "rgba(240,192,64,230)"  # Жёлтый
+            elif display_ping < 300:
+                col = "rgba(255,165,0,230)"  # Оранжевый
             else:
-                col = "rgba(240,112,64,230)"
-            self._ping_lbl.setText(f"{ping} ms")
+                col = "rgba(240,80,80,230)"  # Красный
+
+            # Если пинг больше 999, показываем "999+ ms"
+            if ping > 999:
+                self._ping_lbl.setText("999 ms")
+            else:
+                self._ping_lbl.setText(f"{ping} ms")
+
             self._ping_lbl.setStyleSheet(f"color: {col}; background: transparent;")
         lay.addWidget(self._ping_lbl)
 
@@ -810,7 +850,7 @@ class VpnSubscriptionCard(QWidget):
         name_lbl = QLabel(sub["name"])
         name_lbl.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         name_lbl.setStyleSheet(
-            "color: rgba(232,226,255,245); background: transparent; letter-spacing: 1px;")
+            "color: rgb(255,255,255); background: transparent; letter-spacing: 1px;")
         hdr.addWidget(name_lbl)
         hdr.addStretch()
 
@@ -821,19 +861,10 @@ class VpnSubscriptionCard(QWidget):
         # Кнопки в заголовке
         for png_rel, fallback, tip in [
             ("assets/app_images/reload.png", "↻", "Обновить серверы"),
-            ("assets/app_images/copy.png",   "⎘", "Копировать ссылку"),
-            ("",                             "✕", "Удалить подписку"),
+            ("assets/app_images/copy.png", "⎘", "Копировать ссылку"),
+            ("assets/app_images/delete.png", "✕", "Удалить подписку"),
         ]:
-            if not png_rel:
-                # Текстовая кнопка (удалить)
-                btn = QPushButton("✕")
-                btn.setFixedSize(34, 34)
-                btn.setFont(QFont("Segoe UI", 17))
-                btn.setToolTip(tip)
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setStyleSheet(themed_btn_ss("padding-bottom: 1px; padding-left: 1px;"))
-            else:
-                btn = self._make_icon_btn(png_rel, fallback, tip)
+            btn = self._make_icon_btn(png_rel, fallback, tip)
 
             self._themed_btns.append(btn)
             hdr.addWidget(btn)
@@ -916,20 +947,26 @@ class VpnSubscriptionCard(QWidget):
     # ── Вспомогательный метод: кнопка с PNG-иконкой ──────
 
     def _make_icon_btn(self, png_rel: str, fallback: str, tip: str) -> QPushButton:
-        """Создаёт кнопку 34×34 с PNG-иконкой в цвете темы."""
+        """Создаёт кнопку 34×34 с PNG-иконкой всегда белого цвета."""
         btn = QPushButton()
         btn.setFixedSize(34, 34)
         btn.setToolTip(tip)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(themed_btn_ss())
+        btn.setStyleSheet(themed_btn_ss() + """
+            QPushButton {
+                padding: 0px;
+                text-align: center;
+            }
+        """)
 
         icon_path = os.path.join(_PROJECT_DIR, png_rel)
         btn.setProperty("icon_png_path", icon_path)
         src = QPixmap(icon_path)
 
         if not src.isNull():
-            colored = _tint_pixmap(src, _theme_icon_color())
-            scaled  = colored.scaled(
+            # Всегда белый цвет иконки
+            colored = _tint_pixmap(src, QColor(255, 255, 255))
+            scaled = colored.scaled(
                 20, 20,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
@@ -955,7 +992,7 @@ class VpnSubscriptionCard(QWidget):
                 if icon_path:
                     src = QPixmap(icon_path)
                     if not src.isNull():
-                        colored = _tint_pixmap(src, _theme_icon_color())
+                        colored = _tint_pixmap(src, QColor(255, 255, 255))
                         scaled  = colored.scaled(
                             20, 20,
                             Qt.AspectRatioMode.KeepAspectRatio,
@@ -977,15 +1014,21 @@ class VpnSubscriptionCard(QWidget):
     def _retheme(self, _c: QColor) -> None:
         """Перекрашивает кнопки и скроллбар при смене темы."""
         self._scroll.setStyleSheet(scrollbar_ss())
-        icon_color = _theme_icon_color()
         for btn in self._themed_btns:
-            btn.setStyleSheet(themed_btn_ss())
+            # Сохраняем padding и выравнивание
+            btn.setStyleSheet(themed_btn_ss() + """
+                QPushButton {
+                    padding: 0px;
+                    text-align: center;
+                }
+            """)
+            # НЕ перекрашиваем иконки — оставляем белыми
             icon_path = btn.property("icon_png_path")
             if icon_path:
                 src = QPixmap(icon_path)
-                if not src.isNull():
-                    colored = _tint_pixmap(src, icon_color)
-                    scaled  = colored.scaled(
+                if not src.isNull() and btn.icon().isNull():
+                    colored = _tint_pixmap(src, QColor(255, 255, 255))
+                    scaled = colored.scaled(
                         20, 20,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
@@ -1047,7 +1090,7 @@ class VpnSubscriptionCard(QWidget):
                 if icon_path:
                     src = QPixmap(icon_path)
                     if not src.isNull():
-                        colored = _tint_pixmap(src, _theme_icon_color())
+                        colored = _tint_pixmap(src, QColor(255, 255, 255))
                         scaled  = colored.scaled(
                             20, 20,
                             Qt.AspectRatioMode.KeepAspectRatio,
